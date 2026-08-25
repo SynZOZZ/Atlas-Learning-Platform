@@ -1,0 +1,11 @@
+ATLAS LEARNING PLATFORM — COMMERCIAL SOURCE PACKAGE
+Version: 1.1.0
+Package date: 2026-08-23
+
+This delivery contains independent Next.js/PostgreSQL source code, Docker
+configuration, database schema and seed data, setup/backup scripts, and Arabic
+handover documentation. Demo brand, accounts, courses, contact details, payment
+settings, streaming settings, SMTP settings, and legal copy are placeholders and
+must be replaced before a public production launch.
+
+Start with README.md, then read CLIENT_HANDOVER_AR.md.

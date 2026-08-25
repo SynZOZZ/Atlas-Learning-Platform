@@ -1,0 +1,38 @@
+include:
+  - docker-compose.yml
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: builder
+    restart: "no"
+    environment:
+      NODE_ENV: development
+    command: npm run dev
+    ports:
+      - "3000:3000"
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - /app/.next
+    develop:
+      watch:
+        - action: sync
+          path: ./app
+          target: /app/app
+        - action: sync
+          path: ./components
+          target: /app/components
+        - action: sync
+          path: ./lib
+          target: /app/lib
+        - action: sync
+          path: ./public
+          target: /app/public
+        - action: rebuild
+          path: ./package.json
+
+  db:
+    restart: unless-stopped
