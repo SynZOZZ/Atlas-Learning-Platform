@@ -17,7 +17,8 @@ export async function sendPasswordResetEmail(recipient: string, resetUrl: string
       : undefined,
   });
 
-  const siteName = process.env.NEXT_PUBLIC_SITE_NAME || "Atlas Learning";
+  const configuredSiteName = process.env.NEXT_PUBLIC_SITE_NAME?.trim();
+  const siteName = !configuredSiteName || /^Atlas Learning/i.test(configuredSiteName) ? "4Z Academy" : configuredSiteName;
   await transporter.sendMail({
     from: process.env.SMTP_FROM,
     to: recipient,
