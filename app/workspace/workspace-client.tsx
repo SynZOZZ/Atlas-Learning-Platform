@@ -16,17 +16,26 @@ type WorkspaceData = {
   users: AnyRow[];
   payments: AnyRow[];
   deviceRequests: AnyRow[];
+  accessCodes: AnyRow[];
+  demoPayments: boolean;
 };
 
-const emptyData: WorkspaceData = { user: {} as PlatformUser, courses: [], lessons: [], enrollments: [], notifications: [], messages: [], mediaAssets: [], users: [], payments: [], deviceRequests: [] };
+const emptyData: WorkspaceData = { user: {} as PlatformUser, courses: [], lessons: [], enrollments: [], notifications: [], messages: [], mediaAssets: [], users: [], payments: [], deviceRequests: [], accessCodes: [], demoPayments: false };
 
 const labels = {
-  en: { overview: "Overview", courses: "Courses", students: "Students", payments: "Payments", devices: "Devices", messages: "Messages", learning: "My learning", discover: "Discover", notifications: "Notifications", profile: "Profile", protection: "Player demo" },
-  ar: { overview: "نظرة عامة", courses: "الكورسات", students: "الطلاب", payments: "المدفوعات", devices: "الأجهزة", messages: "الرسائل", learning: "تعليمي", discover: "استكشف", notifications: "الإشعارات", profile: "البيانات", protection: "مشغل الحماية" },
+  en: { overview: "Overview", courses: "Courses", studio: "Video & live", instructors: "Instructors", access: "Access codes", students: "Students", payments: "Payments", devices: "Devices", messages: "Messages", learning: "My learning", activate: "Activate code", discover: "Discover", notifications: "Notifications", profile: "Profile", protection: "Player demo" },
+  ar: { overview: "نظرة عامة", courses: "الكورسات", studio: "الفيديو والبث", instructors: "المدرسين", access: "أكواد الاشتراك", students: "الطلاب", payments: "المدفوعات", devices: "الأجهزة", messages: "الرسائل", learning: "تعليمي", activate: "تفعيل كود", discover: "استكشف", notifications: "الإشعارات", profile: "البيانات", protection: "مشغل الحماية" },
 };
+const planLabels: Record<string,string> = { full_curriculum:"Full curriculum · منهج كامل", mid_review:"Midterm review · مراجعة الميد", before_mid:"Before midterm · قبل الميد", after_mid:"After midterm · بعد الميد", final_review:"Final review · مراجعة فاينل" };
 
 function value(row: AnyRow, camel: string, snake?: string) {
   return row[camel] ?? (snake ? row[snake] : undefined) ?? "";
+}
+
+function isSecureUrl(input: string) {
+  if (input.startsWith("/api/")) return true;
+  try { return new URL(input).protocol === "https:"; }
+  catch { return false; }
 }
 
 async function readJson(response: Response) {
@@ -128,7 +137,7 @@ export default function WorkspaceClient({ initialUser, signOutHref }: { initialU
       const response = await fetch("/api/courses", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "save", data: course }) });
       const payload = await readJson(response);
       if (!response.ok) throw new Error(String(payload.error || "Course could not be saved"));
-      setNotice("Course published and saved.");
+      setNotice(course.id ? "Course updated." : "Course saved as a draft. Publish it when it is ready.");
       await load();
       return true;
     } catch (caught) { setError(caught instanceof Error ? caught.message : "Course could not be saved"); setBusy(false); return false; }
@@ -147,15 +156,15 @@ export default function WorkspaceClient({ initialUser, signOutHref }: { initialU
   };
 
   const managerNav = role === "admin"
-    ? [["overview", t.overview], ["courses", t.courses], ["students", t.students], ["payments", t.payments], ["devices", t.devices], ["notifications", t.notifications], ["messages", t.messages], ["protection", t.protection]]
-    : [["overview", t.overview], ["courses", t.courses], ["students", t.students], ["notifications", t.notifications], ["messages", t.messages], ["protection", t.protection]];
-  const studentNav = [["learning", t.learning], ["discover", t.discover], ["notifications", t.notifications], ["messages", t.messages], ["profile", t.profile]];
+    ? [["overview", t.overview], ["courses", t.courses], ["studio", t.studio], ["instructors", t.instructors], ["access", t.access], ["students", t.students], ["payments", t.payments], ["devices", t.devices], ["notifications", t.notifications], ["messages", t.messages], ["protection", t.protection]]
+    : [["overview", t.overview], ["courses", t.courses], ["studio", t.studio], ["students", t.students], ["notifications", t.notifications], ["messages", t.messages], ["protection", t.protection]];
+  const studentNav = [["learning", t.learning], ["activate", t.activate], ["discover", t.discover], ["notifications", t.notifications], ["messages", t.messages], ["profile", t.profile]];
   const nav = role === "student" ? studentNav : managerNav;
 
   return (
     <main className="workspace-shell">
       <aside className="workspace-sidebar">
-        <Link className="workspace-brand" href="/"><span>A</span><b>ATLAS</b><small>LEARNING</small></Link>
+        <Link className="workspace-brand" href="/"><img src="/assets/4z-academy-logo.png" alt="" /><b>4Z ACADEMY</b><small>LEARNING PLATFORM</small></Link>
         <nav>{nav.map(([id, label], index) => <button key={id} className={active === id ? "active" : ""} onClick={() => setActive(id)}><i>{String(index + 1).padStart(2, "0")}</i>{label}{id === "notifications" && data.notifications.some((row) => !row.read) ? <em>{data.notifications.filter((row) => !row.read).length}</em> : null}</button>)}</nav>
         <div className="workspace-profile"><span>{data.user?.name?.split(" ").map((part) => part[0]).slice(0, 2).join("") || "A"}</span><div><b>{data.user?.name}</b><small>{role} · {data.user?.status}</small></div></div>
       </aside>
@@ -172,13 +181,17 @@ export default function WorkspaceClient({ initialUser, signOutHref }: { initialU
 
         {!busy && role === "student" && data.user.status !== "approved" ? <PendingProfile user={data.user} act={act} /> : null}
         {!busy && (role !== "student" || data.user.status === "approved") && active === "overview" && <ManagerOverview data={data} role={role} />}
-        {!busy && active === "courses" && role !== "student" && <CourseManager courses={data.courses} lessons={data.lessons} saveCourse={saveCourse} manageCourse={manageCourse} act={act} role={role} />}
+        {!busy && active === "courses" && role !== "student" && <CourseManager courses={data.courses} saveCourse={saveCourse} manageCourse={manageCourse} role={role} />}
+        {!busy && active === "studio" && role !== "student" && <ContentStudio courses={data.courses} lessons={data.lessons} act={act} />}
+        {!busy && active === "instructors" && role === "admin" && <InstructorManager data={data} />}
+        {!busy && active === "access" && role === "admin" && <AccessCodeManager data={data} act={act} />}
         {!busy && active === "students" && role !== "student" && <StudentManager users={data.users} enrollments={data.enrollments} role={role} act={act} />}
         {!busy && active === "payments" && role === "admin" && <PaymentManager payments={data.payments} act={act} />}
         {!busy && active === "devices" && role === "admin" && <DeviceManager rows={data.deviceRequests} act={act} />}
         {!busy && active === "protection" && role !== "student" && <ProtectedPlayer name={data.user.name} email={data.user.email} />}
         {!busy && active === "learning" && role === "student" && data.user.status === "approved" && <MyLearning data={data} />}
-        {!busy && active === "discover" && role === "student" && data.user.status === "approved" && <Discover courses={data.courses} act={act} />}
+        {!busy && active === "activate" && role === "student" && data.user.status === "approved" && <ActivateCode accessCodes={data.accessCodes} act={act} />}
+        {!busy && active === "discover" && role === "student" && data.user.status === "approved" && <Discover courses={data.courses} demoPayments={data.demoPayments} act={act} />}
         {!busy && active === "notifications" && (role !== "student" || data.user.status === "approved") && <Notifications rows={data.notifications} act={act} />}
         {!busy && active === "messages" && (role !== "student" || data.user.status === "approved") && <Messages data={data} act={act} />}
         {!busy && active === "profile" && role === "student" && data.user.status === "approved" && <ProfileForm user={data.user} act={act} />}
@@ -191,57 +204,113 @@ function ManagerOverview({ data, role }: { data: WorkspaceData; role: string }) 
   const students = data.users.filter((user) => user.role === "student");
   const pending = students.filter((user) => user.status === "pending").length;
   const revenue = data.payments.filter((row) => row.status === "paid").reduce((sum, row) => sum + Number(row.amount || 0), 0);
-  return <div className="workspace-stack"><section className="workspace-stats"><Stat label="Active courses" number={data.courses.filter((course) => Boolean(course.published)).length} note="Publicly visible" /><Stat label="Student profiles" number={students.length} note={`${pending} waiting for review`} /><Stat label="Paid enrollments" number={data.enrollments.filter((row) => row.payment_status === "paid").length} note="Access is active" /><Stat label="Verified revenue" number={`${revenue.toLocaleString()} EGP`} note={role === "admin" ? "Approved payments" : "Platform total"} /></section><section className="workspace-panel"><div className="panel-heading"><div><p>OPERATIONS</p><h2>Today at a glance</h2></div><span className="status-chip">Live data</span></div><div className="activity-grid"><article><b>{pending}</b><span>profiles need a decision</span></article><article><b>{data.payments.filter((row) => row.status === "pending").length}</b><span>payments need review</span></article><article><b>{data.deviceRequests.length}</b><span>device change requests</span></article><article><b>{data.messages.length}</b><span>recent conversations</span></article></div></section></div>;
+  return <div className="workspace-stack">{role === "admin" && data.demoPayments ? <section className="launch-warning"><b>Test payment mode is ON</b><p>Students can receive instant access with the test card. Change <code>PAYMENT_PROVIDER=manual</code> in <code>.env</code> and restart before public launch.</p></section> : null}<section className="workspace-stats"><Stat label="Active courses" number={data.courses.filter((course) => Boolean(course.published)).length} note="Publicly visible" /><Stat label="Student profiles" number={students.length} note={`${pending} waiting for review`} /><Stat label="Paid enrollments" number={data.enrollments.filter((row) => row.payment_status === "paid").length} note="Access is active" /><Stat label="Verified revenue" number={`${revenue.toLocaleString()} EGP`} note={role === "admin" ? "Approved payments" : "Platform total"} /></section><section className="workspace-panel"><div className="panel-heading"><div><p>OPERATIONS</p><h2>Today at a glance</h2></div><span className="status-chip">Live data</span></div><div className="activity-grid"><article><b>{pending}</b><span>profiles need a decision</span></article><article><b>{data.payments.filter((row) => row.status === "pending").length}</b><span>payments need review</span></article><article><b>{data.deviceRequests.length}</b><span>device change requests</span></article><article><b>{data.messages.length}</b><span>recent conversations</span></article></div></section></div>;
+}
+
+function InstructorManager({ data }: { data: WorkspaceData }) {
+  const instructors=data.users.filter((row)=>row.role==="instructor");
+  return <section className="workspace-panel"><div className="panel-heading"><div><p>INSTRUCTOR CONTROL</p><h2>Instructors, courses, materials, and students</h2></div><span className="status-chip">{instructors.length} instructors</span></div>{instructors.length?<div className="instructor-grid">{instructors.map((instructor)=>{const courses=data.courses.filter((course)=>String(value(course,"instructorEmail","instructor_email")).toLowerCase()===String(instructor.email).toLowerCase());const ids=courses.map((course)=>Number(course.id));const enrollments=data.enrollments.filter((row)=>ids.includes(Number(row.course_id)));return <article className="instructor-card" key={String(instructor.email)}><header><span>{String(instructor.name||instructor.email).slice(0,2).toUpperCase()}</span><div><h3>{String(instructor.name)}</h3><p>{String(instructor.email)}</p></div></header><div className="instructor-numbers"><b>{courses.length}<small>Courses</small></b><b>{data.lessons.filter((lesson)=>ids.includes(Number(lesson.course_id))).length}<small>Materials</small></b><b>{new Set(enrollments.map((row)=>String(row.user_email))).size}<small>Students</small></b></div>{courses.map((course)=>{const students=enrollments.filter((row)=>Number(row.course_id)===Number(course.id));return <details key={String(course.id)}><summary><b>{String(value(course,"titleEn","title_en"))}</b><span>{students.length} students · {data.lessons.filter((lesson)=>Number(lesson.course_id)===Number(course.id)).length} materials</span></summary><div className="instructor-students">{students.map((enrollment)=>{const student=data.users.find((row)=>row.email===enrollment.user_email);return <p key={String(enrollment.user_email)}><b>{String(student?.name||enrollment.studentName||enrollment.user_email)}</b><span>{String(enrollment.user_email)} · {String(student?.phone||"No phone")} · {String(student?.specialty||"No specialty")}</span></p>;})}</div></details>;})}</article>;})}</div>:<EmptyState>Assign an instructor to a course to see their dashboard here.</EmptyState>}</section>;
+}
+
+function AccessCodeManager({ data, act }: { data: WorkspaceData; act:(action:string,data:Record<string,unknown>)=>Promise<boolean> }) {
+  const students=data.users.filter((row)=>row.role==="student");const [studentEmail,setStudentEmail]=useState(String(students[0]?.email||""));const [courseId,setCourseId]=useState(Number(data.courses[0]?.id||0));const [planType,setPlanType]=useState("full_curriculum");const [sectionType,setSectionType]=useState("full_curriculum");const [sectionLimit,setSectionLimit]=useState(1);const [availabilityDays,setAvailabilityDays]=useState(30);
+  return <div className="manager-grid"><section className="workspace-panel form-panel"><div className="panel-heading"><div><p>PERSONAL ACCESS</p><h2>Generate a student code</h2></div></div><div className="control-form"><label>Student<select value={studentEmail} onChange={(e)=>setStudentEmail(e.target.value)}><option value="">Choose student</option>{students.map((s)=><option key={String(s.email)} value={String(s.email)}>{String(s.name)} · {String(s.email)}</option>)}</select></label><label>Course<select value={courseId} onChange={(e)=>setCourseId(Number(e.target.value))}><option value="0">Choose course</option>{data.courses.map((c)=><option key={String(c.id)} value={String(c.id)}>{String(value(c,"titleEn","title_en"))}</option>)}</select></label><label>Subscription plan<select value={planType} onChange={(e)=>{setPlanType(e.target.value);setSectionType(e.target.value);}}>{Object.entries(planLabels).map(([id,label])=><option key={id} value={id}>{label}</option>)}</select></label><label>Allowed section type<select value={sectionType} disabled={planType==="full_curriculum"} onChange={(e)=>setSectionType(e.target.value)}>{Object.entries(planLabels).map(([id,label])=><option key={id} value={id}>{label}</option>)}</select></label><label>Number of sections<input type="number" min="1" max="200" value={sectionLimit} onChange={(e)=>setSectionLimit(Number(e.target.value))}/></label><label>Availability (days)<input type="number" min="1" max="730" value={availabilityDays} onChange={(e)=>setAvailabilityDays(Number(e.target.value))}/></label><button className="workspace-primary" disabled={!studentEmail||!courseId} onClick={()=>void act("generateAccessCode",{studentEmail,courseId,planType,sectionType,sectionLimit,availabilityDays})}>Generate unique code <span>↗</span></button></div></section><section className="workspace-panel course-list-panel"><div className="panel-heading"><div><p>GENERATED CODES</p><h2>Student access register</h2></div><span className="status-chip">{data.accessCodes.length} codes</span></div>{data.accessCodes.length?<div className="access-code-list">{data.accessCodes.map((row)=><article key={String(row.id)}><code>{String(row.code)}</code><div><b>{String(row.studentName||row.student_email)}</b><p>{String(row.courseTitle)} · {planLabels[String(row.plan_type)]||String(row.plan_type)}</p><small>{Number(row.section_limit)} sections · until {new Date(String(row.available_until)).toLocaleDateString()}</small></div><span className={`review-status ${String(row.status)}`}>{String(row.status)}</span>{row.status!=="revoked"&&<button className="danger-action" onClick={()=>void act("revokeAccessCode",{id:row.id})}>Revoke</button>}</article>)}</div>:<EmptyState>Generate the first personal code for an approved student.</EmptyState>}</section></div>;
+}
+
+function ActivateCode({ accessCodes, act }: { accessCodes:AnyRow[]; act:(action:string,data:Record<string,unknown>)=>Promise<boolean> }) {
+  const [code,setCode]=useState("");return <div className="workspace-stack"><section className="workspace-panel activate-card"><div className="panel-heading"><div><p>PERSONAL COURSE ACCESS</p><h2>Activate your subscription code</h2></div></div><p>Your code is personal and only works with your account.</p><div className="activate-row"><input value={code} onChange={(e)=>setCode(e.target.value.toUpperCase())} placeholder="4Z-XXXXXXXXXXXX"/><button className="workspace-primary" disabled={!code.trim()} onClick={()=>void act("redeemAccessCode",{code}).then((ok)=>ok&&setCode(""))}>Activate code <span>↗</span></button></div></section>{accessCodes.length?<section className="workspace-panel"><div className="access-code-list">{accessCodes.map((row)=><article key={String(row.id)}><div><b>{String(row.courseTitle)}</b><p>{planLabels[String(row.plan_type)]||String(row.plan_type)}</p><small>{Number(row.section_limit)} sections · until {new Date(String(row.available_until)).toLocaleDateString()}</small></div><span className={`review-status ${String(row.status)}`}>{String(row.status)}</span></article>)}</div></section>:null}</div>;
 }
 
 const blankCourse = { titleEn: "", titleAr: "", categoryEn: "", categoryAr: "", summaryEn: "", summaryAr: "", instructorName: "", instructorEmail: "", whatsapp: "", price: 0, mode: "Recorded", imageUrl: "/assets/course-tech.png", level: "All levels", duration: "" };
 
-function CourseManager({ courses, lessons, saveCourse, manageCourse, act, role }: { courses: AnyRow[]; lessons: AnyRow[]; saveCourse: (course: Record<string, unknown>) => Promise<boolean>; manageCourse: (action: "publish" | "delete", course: Record<string, unknown>) => Promise<boolean>; act: (action: string, data: Record<string, unknown>) => Promise<boolean>; role: string }) {
+function CourseManager({ courses, saveCourse, manageCourse, role }: { courses: AnyRow[]; saveCourse: (course: Record<string, unknown>) => Promise<boolean>; manageCourse: (action: "publish" | "delete", course: Record<string, unknown>) => Promise<boolean>; role: string }) {
   const [editing, setEditing] = useState<Record<string, unknown>>(blankCourse);
-  const [lessonCourse, setLessonCourse] = useState(Number(courses[0]?.id || 0));
-  const [lessonTitle, setLessonTitle] = useState("");
-  const [lessonKind, setLessonKind] = useState("video");
-  const [lessonAsset, setLessonAsset] = useState("");
-  const [lessonDuration, setLessonDuration] = useState("");
-  const [uploading, setUploading] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState(0);
-  const [uploadInfo, setUploadInfo] = useState("");
-
-  const upload = async (file: File) => {
-    if (!lessonCourse) return;
-    setUploading(true); setUploadProgress(0); setUploadInfo("");
-    try {
-      const payload = await uploadProtectedFile(file, lessonCourse, setUploadProgress);
-      setLessonAsset(String(payload.url || ""));
-      setLessonKind(file.type.startsWith("video/") ? "video" : "file");
-      if (!lessonTitle) setLessonTitle(file.name.replace(/\.[^.]+$/, "").replaceAll("-", " "));
-      setUploadInfo(`${file.name} · ${(file.size / 1024 / 1024).toFixed(1)} MB · ready to publish`);
-    } catch (caught) { window.alert(caught instanceof Error ? caught.message : "Upload failed"); }
-    finally { setUploading(false); }
-  };
-
   return <div className="manager-grid">
     <section className="workspace-panel course-list-panel">
       <div className="panel-heading"><div><p>COURSE CATALOG</p><h2>{courses.length} editable spaces</h2></div><button className="outline-button" onClick={() => setEditing(blankCourse)}>+ New course</button></div>
-      <div className="dashboard-course-list">{courses.map((course) => <article key={String(course.id)}>
+      {courses.length ? <div className="dashboard-course-list">{courses.map((course) => <article key={String(course.id)}>
         <img src={String(value(course, "imageUrl", "image_url"))} alt="" />
         <div><small>{String(value(course, "categoryEn", "category_en"))} · {String(course.mode)}</small><h3>{String(value(course, "titleEn", "title_en"))}</h3><p>{String(value(course, "instructorName", "instructor_name"))}</p></div>
         <div className="row-actions">
           <button onClick={() => setEditing({ ...course, titleEn: value(course, "titleEn", "title_en"), titleAr: value(course, "titleAr", "title_ar"), categoryEn: value(course, "categoryEn", "category_en"), categoryAr: value(course, "categoryAr", "category_ar"), summaryEn: value(course, "summaryEn", "summary_en"), summaryAr: value(course, "summaryAr", "summary_ar"), instructorName: value(course, "instructorName", "instructor_name"), instructorEmail: value(course, "instructorEmail", "instructor_email"), imageUrl: value(course, "imageUrl", "image_url") })}>Edit</button>
           <button onClick={() => void manageCourse("publish", { id: course.id, published: !course.published })}>{course.published ? "Hide" : "Publish"}</button>
-          <button className="danger-action" onClick={() => window.confirm("Delete this course and all of its lessons?") && void manageCourse("delete", { id: course.id })}>Delete</button>
-          <span className={course.published ? "published" : "draft"}>{course.published ? "Published" : "Hidden"}</span>
+          <button className="danger-action" onClick={() => window.confirm("Delete this course and all related lessons, enrollments, payments, and messages?") && void manageCourse("delete", { id: course.id })}>Delete</button>
+          <span className={course.published ? "published" : "draft"}>{course.published ? "Published" : "Draft"}</span>
         </div>
-      </article>)}</div>
+      </article>)}</div> : <EmptyState>No courses yet. Use the editor to create your first draft.</EmptyState>}
     </section>
-    <section className="workspace-panel form-panel"><div className="panel-heading"><div><p>EDITOR</p><h2>{editing.id ? "Update course" : "Create course"}</h2></div></div><CourseForm data={editing} setData={setEditing} onSave={saveCourse} role={role} /></section>
-    <section className="workspace-panel lesson-panel">
-      <div className="panel-heading"><div><p>COURSE MATERIAL</p><h2>Add and arrange lessons</h2></div></div>
-      <div className="control-form"><label>Course<select value={lessonCourse} onChange={(event) => { setLessonCourse(Number(event.target.value)); setLessonAsset(""); setUploadInfo(""); }}>{courses.map((course) => <option key={String(course.id)} value={String(course.id)}>{String(value(course, "titleEn", "title_en"))}</option>)}</select></label><label>Title<input value={lessonTitle} onChange={(event) => setLessonTitle(event.target.value)} placeholder="Lesson title" /></label><label>Type<select value={lessonKind} onChange={(event) => setLessonKind(event.target.value)}><option value="video">Recorded video</option><option value="live">Live session</option><option value="file">View-only file</option></select></label><label>Duration / schedule<input value={lessonDuration} onChange={(event) => setLessonDuration(event.target.value)} placeholder="08:24 or Thursday 19:30" /></label><label>Private asset / meeting URL<input value={lessonAsset} onChange={(event) => setLessonAsset(event.target.value)} placeholder="Upload a file or add a private URL" /></label><label className={`file-input ${uploading ? "uploading" : ""}`}>{uploading ? `Uploading ${uploadProgress}%` : "Choose video, PDF, or image"}<input disabled={uploading} type="file" accept="video/*,.pdf,image/*" onChange={(event) => event.target.files?.[0] && void upload(event.target.files[0])} />{uploading ? <span style={{ width: `${uploadProgress}%` }} /> : null}</label>{uploadInfo ? <p className="upload-info">✓ {uploadInfo}</p> : <p className="upload-help">The upload is private. Publish it below to add it to the course room.</p>}<button disabled={uploading || !lessonTitle || (lessonKind !== "live" && !lessonAsset)} className="workspace-primary" onClick={() => void act("addLesson", { courseId: lessonCourse, title: lessonTitle, kind: lessonKind, assetUrl: lessonAsset, duration: lessonDuration }).then((ok) => { if (ok) { setLessonTitle(""); setLessonAsset(""); setLessonDuration(""); setUploadInfo(""); setUploadProgress(0); } })}>Publish material <span>↗</span></button></div>
-      <div className="mini-list">{lessons.filter((lesson) => Number(lesson.course_id) === lessonCourse).map((lesson) => <div key={String(lesson.id)}><span>{lesson.kind === "video" ? "▶" : lesson.kind === "live" ? "●" : "□"}</span><p><b>{String(lesson.title)}</b><small>{String(lesson.duration || lesson.kind)}</small></p><div className="row-actions"><button onClick={() => void act("moveLesson", { id: lesson.id, direction: "up" })}>↑</button><button onClick={() => void act("moveLesson", { id: lesson.id, direction: "down" })}>↓</button><button className="danger-action" onClick={() => window.confirm("Delete this lesson?") && void act("deleteLesson", { id: lesson.id })}>Delete</button></div></div>)}</div>
+    <section className="workspace-panel form-panel"><div className="panel-heading"><div><p>EDITOR</p><h2>{editing.id ? "Update course" : "Create course draft"}</h2></div></div><CourseForm data={editing} setData={setEditing} onSave={saveCourse} role={role} /></section>
+  </div>;
+}
+
+function ContentStudio({ courses, lessons, act }: { courses: AnyRow[]; lessons: AnyRow[]; act: (action: string, data: Record<string, unknown>) => Promise<boolean> }) {
+  const [courseId, setCourseId] = useState(Number(courses[0]?.id || 0));
+  const [title, setTitle] = useState("");
+  const [kind, setKind] = useState("video");
+  const [assetUrl, setAssetUrl] = useState("");
+  const [duration, setDuration] = useState("");
+  const [sectionType, setSectionType] = useState("full_curriculum");
+  const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadInfo, setUploadInfo] = useState("");
+
+  const selectedCourse = courses.find((course) => Number(course.id) === courseId);
+  const selectedLessons = lessons.filter((lesson) => Number(lesson.course_id) === courseId);
+  const secureAsset = assetUrl ? isSecureUrl(assetUrl) : false;
+  const canPublish = Boolean(courseId && title.trim() && assetUrl && secureAsset && (kind !== "live" || duration.trim()));
+
+  const chooseKind = (nextKind: string) => {
+    setKind(nextKind);
+    setAssetUrl("");
+    setDuration("");
+    setUploadInfo("");
+    setUploadProgress(0);
+  };
+
+  const upload = async (file: File) => {
+    if (!courseId) return;
+    setUploading(true); setUploadProgress(0); setUploadInfo("");
+    try {
+      const payload = await uploadProtectedFile(file, courseId, setUploadProgress);
+      setAssetUrl(String(payload.url || ""));
+      setKind(file.type.startsWith("video/") ? "video" : "file");
+      if (!title) setTitle(file.name.replace(/\.[^.]+$/, "").replaceAll("-", " "));
+      setUploadInfo(`${file.name} · ${(file.size / 1024 / 1024).toFixed(1)} MB · ready`);
+    } catch (caught) { window.alert(caught instanceof Error ? caught.message : "Upload failed"); }
+    finally { setUploading(false); }
+  };
+
+  if (!courses.length) {
+    return <section className="workspace-panel"><div className="panel-heading"><div><p>CONTENT STUDIO</p><h2>Video, live, and files</h2></div></div><EmptyState>Create a course draft first. Then return here to upload a video, schedule a live session, or add a protected file.</EmptyState></section>;
+  }
+
+  return <div className="studio-grid">
+    <section className="workspace-panel studio-create">
+      <div className="panel-heading"><div><p>CONTENT STUDIO</p><h2>Add learning material</h2></div><span className="status-chip">Private until enrolled</span></div>
+      <div className="studio-course"><label>Course<select value={courseId} onChange={(event) => { setCourseId(Number(event.target.value)); setAssetUrl(""); setUploadInfo(""); }}>{courses.map((course) => <option key={String(course.id)} value={String(course.id)}>{String(value(course, "titleEn", "title_en"))}</option>)}</select></label><p>{selectedCourse?.published ? "This course is public. Enrolled students will be notified." : "This course is still a draft. Its material remains hidden from students."}</p></div>
+      <div className="format-picker" role="group" aria-label="Content type">
+        <button className={kind === "video" ? "active" : ""} onClick={() => chooseKind("video")}><b>▶</b><span>Recorded video<small>Upload MP4/WebM or use a secure media URL</small></span></button>
+        <button className={kind === "live" ? "active" : ""} onClick={() => chooseKind("live")}><b>●</b><span>Live session<small>Add a meeting link and clear schedule</small></span></button>
+        <button className={kind === "file" ? "active" : ""} onClick={() => chooseKind("file")}><b>□</b><span>Protected file<small>PDFs and images open inside the course room</small></span></button>
+      </div>
+      <div className="control-form">
+        <label>Lesson title<input value={title} onChange={(event) => setTitle(event.target.value)} placeholder={kind === "live" ? "Weekly live Q&A" : "Introduction and roadmap"} /></label>
+        <label>{kind === "live" ? "Date and time" : "Duration / label"}<input value={duration} onChange={(event) => setDuration(event.target.value)} placeholder={kind === "live" ? "Thursday 19:30 Cairo time" : kind === "video" ? "08:24" : "PDF guide"} /></label>
+        <label>Section / package<select value={sectionType} onChange={(event) => setSectionType(event.target.value)}>{Object.entries(planLabels).map(([id,label]) => <option key={id} value={id}>{label}</option>)}</select></label>
+        <label>{kind === "live" ? "Secure meeting URL" : "Secure media URL"}<input value={assetUrl} onChange={(event) => setAssetUrl(event.target.value)} placeholder={kind === "live" ? "https://meet.google.com/…" : "Upload below or paste an HTTPS URL"} /></label>
+        {assetUrl && !secureAsset ? <p className="field-warning">Use an HTTPS link. Uploaded files are accepted automatically.</p> : null}
+        {kind !== "live" ? <><label className={`file-input ${uploading ? "uploading" : ""}`}>{uploading ? `Uploading ${uploadProgress}%` : kind === "video" ? "Choose a video file" : "Choose a PDF or image"}<input disabled={uploading} type="file" accept={kind === "video" ? "video/*" : ".pdf,image/*"} onChange={(event) => event.target.files?.[0] && void upload(event.target.files[0])} />{uploading ? <span style={{ width: `${uploadProgress}%` }} /> : null}</label>{uploadInfo ? <p className="upload-info">✓ {uploadInfo}</p> : <p className="upload-help">The original file stays behind signed-in course access.</p>}</> : <p className="upload-help">Only paid, active students in this course can see the live-room link.</p>}
+        <button disabled={uploading || !canPublish} className="workspace-primary" onClick={() => void act("addLesson", { courseId, title, kind, assetUrl, duration, sectionType }).then((ok) => { if (ok) { setTitle(""); setAssetUrl(""); setDuration(""); setUploadInfo(""); setUploadProgress(0); } })}>Add to course <span>↗</span></button>
+      </div>
+      {assetUrl && secureAsset ? <div className={`studio-preview ${kind}`}>{kind === "video" ? <video src={assetUrl} controls controlsList="nodownload noremoteplayback" disablePictureInPicture preload="metadata" /> : kind === "live" ? <><span>● LIVE PREVIEW</span><h3>{title || "Live session"}</h3><p>{duration || "Add the session time above"}</p><a href={assetUrl} target="_blank" rel="noreferrer">Test meeting link ↗</a></> : <><b>□</b><p>{title || "Protected file"}</p><small>The student will open this file inside the protected viewer.</small></>}</div> : null}
+    </section>
+    <section className="workspace-panel studio-library">
+      <div className="panel-heading"><div><p>COURSE OUTLINE</p><h2>{String(value(selectedCourse || {}, "titleEn", "title_en"))}</h2></div><span className="status-chip">{selectedLessons.length} items</span></div>
+      {selectedLessons.length ? <div className="mini-list">{selectedLessons.map((lesson) => <div key={String(lesson.id)}><span>{lesson.kind === "video" ? "▶" : lesson.kind === "live" ? "●" : "□"}</span><p><b>{String(lesson.title)}</b><small>{String(lesson.kind)} · {String(lesson.duration || "No duration")}</small></p><div className="row-actions"><button onClick={() => void act("moveLesson", { id: lesson.id, direction: "up" })}>↑</button><button onClick={() => void act("moveLesson", { id: lesson.id, direction: "down" })}>↓</button><button className="danger-action" onClick={() => window.confirm("Delete this material permanently?") && void act("deleteLesson", { id: lesson.id })}>Delete</button></div></div>)}</div> : <EmptyState>No material in this course yet. Add a test video or live session from the studio.</EmptyState>}
     </section>
   </div>;
 }
+
 
 function CourseForm({ data, setData, onSave, role }: { data: Record<string, unknown>; setData: (data: Record<string, unknown>) => void; onSave: (data: Record<string, unknown>) => Promise<boolean>; role: string }) {
   const field = (name: string, label: string, type = "text") => <label>{label}<input type={type} value={String(data[name] ?? "")} onChange={(event) => setData({ ...data, [name]: type === "number" ? Number(event.target.value) : event.target.value })} /></label>;
@@ -257,7 +326,7 @@ function StudentManager({ users, enrollments, role, act }: { users: AnyRow[]; en
 }
 
 function PaymentManager({ payments, act }: { payments: AnyRow[]; act: (action: string, data: Record<string, unknown>) => Promise<boolean> }) {
-  return <section className="workspace-panel"><div className="panel-heading"><div><p>PAYMENT CONTROL</p><h2>Enrollment transactions</h2></div><span className="status-chip">Test + manual review</span></div>{payments.length ? <div className="data-table payment-table">{payments.map((payment) => <article key={String(payment.id)}><div><b>{String(payment.studentName || payment.user_email)}</b><small>{String(payment.user_email)}</small></div><div><b>{String(payment.courseTitle)}</b><small>{String(payment.method).replaceAll("_", " ")}</small></div><div><b>{Number(payment.amount).toLocaleString()} EGP</b><small>Ref: {String(payment.reference || "—")}</small></div><span className={`review-status ${String(payment.status)}`}>{String(payment.status)}</span><div className="row-actions">{payment.status === "pending" && <><button onClick={() => void act("reviewPayment", { id: payment.id, status: "paid" })}>Confirm</button><button onClick={() => void act("reviewPayment", { id: payment.id, status: "rejected" })}>Reject</button></>}</div></article>)}</div> : <EmptyState>Payment requests will appear here after enrollment.</EmptyState>}</section>;
+  return <section className="workspace-panel"><div className="panel-heading"><div><p>PAYMENT CONTROL</p><h2>Enrollment transactions</h2></div><span className="status-chip">Manual review</span></div>{payments.length ? <div className="data-table payment-table">{payments.map((payment) => <article key={String(payment.id)}><div><b>{String(payment.studentName || payment.user_email)}</b><small>{String(payment.user_email)}</small></div><div><b>{String(payment.courseTitle)}</b><small>{String(payment.method).replaceAll("_", " ")}</small></div><div><b>{Number(payment.amount).toLocaleString()} EGP</b><small>Ref: {String(payment.reference || "—")}</small></div><span className={`review-status ${String(payment.status)}`}>{String(payment.status)}</span><div className="row-actions">{payment.status === "pending" && <><button onClick={() => void act("reviewPayment", { id: payment.id, status: "paid" })}>Confirm</button><button onClick={() => void act("reviewPayment", { id: payment.id, status: "rejected" })}>Reject</button></>}</div></article>)}</div> : <EmptyState>Payment requests will appear here after enrollment.</EmptyState>}</section>;
 }
 
 function DeviceManager({ rows, act }: { rows: AnyRow[]; act: (action: string, data: Record<string, unknown>) => Promise<boolean> }) {
@@ -273,11 +342,16 @@ function ProfileForm({ user, act }: { user: PlatformUser; act: (action: string, 
   return <section className="workspace-panel profile-form"><div className="panel-heading"><div><p>STUDENT DETAILS</p><h2>Clear, reviewable information</h2></div></div><form className="control-form two-column" onSubmit={(event) => { event.preventDefault(); void act("profile", form); }}>{Object.entries({ name: "Full legal name", phone: "Phone number", whatsapp: "WhatsApp number", country: "Country", city: "City", specialty: "Field of study / work" }).map(([name, label]) => <label key={name}>{label}<input required={["name", "phone"].includes(name)} value={form[name as keyof typeof form]} onChange={(event) => setForm({ ...form, [name]: event.target.value })} /></label>)}<button className="workspace-primary wide" type="submit">Submit for review <span>↗</span></button></form></section>;
 }
 
-function Discover({ courses, act }: { courses: AnyRow[]; act: (action: string, data: Record<string, unknown>) => Promise<boolean> }) {
+function Discover({ courses, demoPayments, act }: { courses: AnyRow[]; demoPayments: boolean; act: (action: string, data: Record<string, unknown>) => Promise<boolean> }) {
   const [paying, setPaying] = useState<number | null>(null);
-  const [method, setMethod] = useState("test_card");
+  const [method, setMethod] = useState("cash_transfer");
   const [reference, setReference] = useState("");
-  return <div><div className="workspace-section-heading"><p>Choose a course and its instructor. Access opens only after payment is confirmed.</p></div><div className="workspace-course-grid">{courses.map((course) => <article key={String(course.id)}><img src={String(value(course, "imageUrl", "image_url"))} alt="" /><div><small>{String(value(course, "categoryEn", "category_en"))} · {String(course.mode)}</small><h2>{String(value(course, "titleEn", "title_en"))}</h2><p>with <b>{String(value(course, "instructorName", "instructor_name"))}</b></p><div className="course-price"><strong>{Number(course.price).toLocaleString()} EGP</strong><a href={`https://wa.me/${String(course.whatsapp)}`} target="_blank">WhatsApp ↗</a></div>{course.paymentStatus === "paid" ? <span className="enrolled-chip">Enrolled</span> : paying === Number(course.id) ? <div className="payment-box"><select value={method} onChange={(event) => setMethod(event.target.value)}><option value="test_card">Test card — instant approval</option><option value="visa">Visa / card — gateway review</option><option value="wallet">Orange Cash / wallet</option><option value="cash_transfer">Cash transfer</option></select>{method !== "test_card" && <input value={reference} onChange={(event) => setReference(event.target.value)} placeholder="Payment reference" />}<button onClick={() => void act("enroll", { courseId: course.id, method, reference }).then((ok) => ok && setPaying(null))}>Confirm enrollment</button></div> : <button className="workspace-primary" onClick={() => setPaying(Number(course.id))}>Enroll & pay <span>↗</span></button>}</div></article>)}</div></div>;
+  if (!courses.length) return <section className="workspace-panel"><div className="panel-heading"><div><p>COURSE CATALOG</p><h2>Discover 4Z Academy</h2></div></div><EmptyState>No courses are open for enrollment yet. Published courses will appear here automatically.</EmptyState></section>;
+  return <div><div className="workspace-section-heading"><p>Choose a course and its instructor. Access opens only after payment is confirmed.</p></div><div className="workspace-course-grid">{courses.map((course) => {
+    const whatsapp = String(course.whatsapp || "").replace(/\D/g, "");
+    const canSubmit = method === "test_card" || Boolean(reference.trim());
+    return <article key={String(course.id)}><img src={String(value(course, "imageUrl", "image_url"))} alt="" /><div><small>{String(value(course, "categoryEn", "category_en"))} · {String(course.mode)}</small><h2>{String(value(course, "titleEn", "title_en"))}</h2><p>with <b>{String(value(course, "instructorName", "instructor_name"))}</b></p><div className="course-price"><strong>{Number(course.price).toLocaleString()} EGP</strong>{whatsapp.length >= 8 ? <a href={`https://wa.me/${whatsapp}`} target="_blank" rel="noreferrer">WhatsApp ↗</a> : null}</div>{course.paymentStatus === "paid" ? <span className="enrolled-chip">Enrolled</span> : paying === Number(course.id) ? <div className="payment-box"><select value={method} onChange={(event) => { setMethod(event.target.value); setReference(""); }}>{demoPayments ? <option value="test_card">Test card — local testing only</option> : null}<option value="visa">Visa / card — pending review</option><option value="wallet">Orange Cash / wallet</option><option value="cash_transfer">Cash transfer</option></select>{method !== "test_card" && <input value={reference} onChange={(event) => setReference(event.target.value)} placeholder="Payment reference (required)" />}<button disabled={!canSubmit} onClick={() => void act("enroll", { courseId: course.id, method, reference }).then((ok) => { if (ok) { setPaying(null); setReference(""); } })}>Submit payment request</button></div> : <button className="workspace-primary" onClick={() => setPaying(Number(course.id))}>Enroll & pay <span>↗</span></button>}</div></article>;
+  })}</div></div>;
 }
 
 function MyLearning({ data }: { data: WorkspaceData }) {
@@ -308,7 +382,7 @@ function ProtectedDocument({ source, mimeType, title, name, email }: { source: s
 
 function ProtectedPlayer({ name, email, compact = false, source = "", title = "Protected course preview" }: { name: string; email: string; compact?: boolean; source?: string; title?: string }) {
   const stamp = useMemo(() => `${name} · ${email.replace(/(.{2}).+(@.+)/, "$1***$2")}`, [name, email]);
-  return <section className={`player-demo ${compact ? "compact" : ""}`} onContextMenu={(event) => event.preventDefault()}><div className="player-screen">{source ? <video src={source} title={title} controls controlsList="nodownload noremoteplayback" disablePictureInPicture playsInline preload="metadata" /> : <><img src="/assets/course-tech.png" alt={title} draggable={false} /><button className="play-button" aria-label="Preview only">▶</button><div className="player-controls"><span>PREVIEW</span><i><b /></i><span>Original</span></div></>}<div className="player-shade" /><span className="brand-watermark">ATLAS LEARNING · VIEW ONLY</span><span className="moving-watermark">{stamp}</span></div>{!compact && <div className="player-notes"><article><b>Dynamic identity</b><p>The signed-in student’s masked identity moves across each recorded lesson.</p></article><article><b>Private original file</b><p>Direct uploads play at their original quality. Adaptive 360p–1080p needs a streaming provider later.</p></article><article><b>Practical deterrence</b><p>Authorized playback, no download control, and a visible identity watermark reduce misuse.</p></article></div>}</section>;
+  return <section className={`player-demo ${compact ? "compact" : ""}`} onContextMenu={(event) => event.preventDefault()}><div className="player-screen">{source ? <video src={source} title={title} controls controlsList="nodownload noremoteplayback" disablePictureInPicture playsInline preload="metadata" /> : <><img src="/assets/course-tech.png" alt={title} draggable={false} /><button className="play-button" aria-label="Preview only">▶</button><div className="player-controls"><span>PREVIEW</span><i><b /></i><span>Original</span></div></>}<div className="player-shade" /><span className="brand-watermark">4Z ACADEMY · VIEW ONLY</span><span className="moving-watermark">{stamp}</span></div>{!compact && <div className="player-notes"><article><b>Dynamic identity</b><p>The signed-in student’s masked identity moves across each recorded lesson.</p></article><article><b>Private original file</b><p>Direct uploads play at their original quality. Adaptive 360p–1080p needs a streaming provider later.</p></article><article><b>Practical deterrence</b><p>Authorized playback, no download control, and a visible identity watermark reduce misuse.</p></article></div>}</section>;
 }
 
 function Notifications({ rows, act }: { rows: AnyRow[]; act: (action: string, data: Record<string, unknown>) => Promise<boolean> }) {
@@ -318,13 +392,14 @@ function Notifications({ rows, act }: { rows: AnyRow[]; act: (action: string, da
 
 function Messages({ data, act }: { data: WorkspaceData; act: (action: string, data: Record<string, unknown>) => Promise<boolean> }) {
   const student = data.user.role === "student";
-  const eligible = student ? data.courses.filter((course) => course.paymentStatus === "paid") : data.courses;
+  const eligible = useMemo(() => student ? data.courses.filter((course) => course.paymentStatus === "paid" && course.enrollmentStatus === "active") : data.courses, [data.courses, student]);
   const [courseId, setCourseId] = useState(Number(eligible[0]?.id || 0));
   const selected = eligible.find((course) => Number(course.id) === courseId);
-  const recipients = student ? [] : data.enrollments.filter((row) => Number(row.course_id) === courseId);
+  const recipients = student ? [] : data.enrollments.filter((row) => Number(row.course_id) === courseId && row.payment_status === "paid" && row.status === "active");
   const [recipient, setRecipient] = useState("");
   const [body, setBody] = useState("");
   const effectiveRecipient = student ? String(value(selected || {}, "instructorEmail", "instructor_email")) : recipient;
   const thread = data.messages.filter((message) => Number(message.course_id) === courseId);
-  return <div className="message-layout"><section className="workspace-panel"><div className="panel-heading"><div><p>COURSE CONVERSATIONS</p><h2>{String(value(selected || {}, "titleEn", "title_en") || "Direct messages")}</h2></div><span className="status-chip">{thread.length} messages</span></div>{thread.length ? <div className="message-list">{thread.map((message) => <article key={String(message.id)} className={message.sender_email === data.user.email ? "mine" : ""}><small>{String(message.senderName || message.sender_email)} → {String(message.receiverName || message.receiver_email)}</small><p>{String(message.body)}</p><time>{String(message.created_at)}</time></article>)}</div> : <EmptyState>No messages in this course yet. Start the conversation from the form.</EmptyState>}</section><section className="workspace-panel compose-panel"><div className="panel-heading"><div><p>NEW MESSAGE</p><h2>Ask in context</h2></div></div><div className="control-form"><label>Course<select value={courseId} onChange={(event) => { setCourseId(Number(event.target.value)); setRecipient(""); }}>{eligible.map((course) => <option key={String(course.id)} value={String(course.id)}>{String(value(course, "titleEn", "title_en"))}</option>)}</select></label>{!student && <label>Enrolled student<select value={recipient} onChange={(event) => setRecipient(event.target.value)}><option value="">Choose a student</option>{recipients.map((row) => <option key={String(row.user_email)} value={String(row.user_email)}>{String(row.studentName || row.user_email)}</option>)}</select></label>} {student ? <p className="message-recipient">To: {String(value(selected || {}, "instructorName", "instructor_name"))}</p> : null}<label>Message<textarea value={body} onChange={(event) => setBody(event.target.value)} placeholder="Write your course-specific message…" /></label><button disabled={!courseId || !effectiveRecipient || !body.trim()} className="workspace-primary" onClick={() => void act("sendMessage", { courseId, receiverEmail: effectiveRecipient, body }).then((ok) => ok && setBody(""))}>Send message <span>↗</span></button></div></section></div>;
+  if (!eligible.length) return <section className="workspace-panel"><div className="panel-heading"><div><p>COURSE CONVERSATIONS</p><h2>Messages</h2></div></div><EmptyState>{student ? "Messages become available after a paid course enrollment is active." : "Create a course and enroll a student before starting course messages."}</EmptyState></section>;
+  return <div className="message-layout"><section className="workspace-panel"><div className="panel-heading"><div><p>COURSE CONVERSATIONS</p><h2>{String(value(selected || {}, "titleEn", "title_en") || "Direct messages")}</h2></div><span className="status-chip">{thread.length} messages</span></div>{thread.length ? <div className="message-list">{thread.map((message) => <article key={String(message.id)} className={message.sender_email === data.user.email ? "mine" : ""}><small>{String(message.senderName || message.sender_email)} → {String(message.receiverName || message.receiver_email)}</small><p>{String(message.body)}</p><time>{String(message.created_at)}</time></article>)}</div> : <EmptyState>No messages in this course yet. Start the conversation from the form.</EmptyState>}</section><section className="workspace-panel compose-panel"><div className="panel-heading"><div><p>NEW MESSAGE</p><h2>Ask in context</h2></div></div><div className="control-form"><label>Course<select value={courseId} onChange={(event) => { setCourseId(Number(event.target.value)); setRecipient(""); }}>{eligible.map((course) => <option key={String(course.id)} value={String(course.id)}>{String(value(course, "titleEn", "title_en"))}</option>)}</select></label>{!student && <label>Active student<select value={recipient} onChange={(event) => setRecipient(event.target.value)}><option value="">Choose a student</option>{recipients.map((row) => <option key={String(row.user_email)} value={String(row.user_email)}>{String(row.studentName || row.user_email)}</option>)}</select></label>} {student ? <p className="message-recipient">To: {String(value(selected || {}, "instructorName", "instructor_name"))}</p> : null}<label>Message<textarea value={body} onChange={(event) => setBody(event.target.value)} placeholder="Write your course-specific message…" /></label><button disabled={!courseId || !effectiveRecipient || !body.trim()} className="workspace-primary" onClick={() => void act("sendMessage", { courseId, receiverEmail: effectiveRecipient, body }).then((ok) => ok && setBody(""))}>Send message <span>↗</span></button></div></section></div>;
 }
