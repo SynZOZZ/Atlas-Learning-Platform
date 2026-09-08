@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.4.0
+
+- Retired the nine placeholder courses and removed their lessons, enrollments, payments, messages, notifications, uploads, and demo accounts with a one-time safe migration.
+- Kept the administrator and all non-demo user data intact.
+- Added a dedicated **Video & live** studio with upload progress, format guidance, previews, secure meeting-link validation, and course-outline controls.
+- New courses now start as hidden drafts and must be published deliberately.
+- Added useful empty states for the public catalog, student discovery, messages, and course management.
+- Disabled instant test-card access by default and tightened course-message permissions and server error privacy.
+
 ## 1.1.0
 
 - Added visible upload progress and protected video, PDF, and image metadata.
