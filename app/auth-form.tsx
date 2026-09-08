@@ -31,7 +31,7 @@ export default function AuthForm({ mode, token = "" }: { mode: Mode; token?: str
   }
 
   const title = mode === "login" ? "Welcome back." : mode === "register" ? "Create your student profile." : mode === "forgot" ? "Reset your password." : "Choose a new password.";
-  return <main className="auth-screen"><section className="auth-card auth-form-card"><Link className="academy-brand" href="/"><span>A</span> ATLAS <small>LEARNING</small></Link><p className="micro-label">ATLAS LEARNING</p><h1>{title}</h1><form className="control-form" onSubmit={submit}>
+  return <main className="auth-screen"><section className="auth-card auth-form-card"><Link className="academy-brand" href="/" aria-label="4Z Academy home"><img src="/assets/4z-academy-logo.png" alt="4Z Academy" /></Link><p className="micro-label">4Z ACADEMY</p><h1>{title}</h1><form className="control-form" onSubmit={submit}>
     {mode === "register" && <><label>Full name<input name="name" required autoComplete="name" /></label><label>Phone number<input name="phone" required autoComplete="tel" /></label><div className="two-auth-fields"><label>WhatsApp<input name="whatsapp" autoComplete="tel" /></label><label>Country<input name="country" autoComplete="country-name" /></label></div><div className="two-auth-fields"><label>City<input name="city" /></label><label>Field of study / work<input name="specialty" /></label></div></>}
     {mode !== "reset" && <label>Email address<input name="email" required type="email" autoComplete="email" /></label>}
     {!["forgot"].includes(mode) && <label>{mode === "reset" ? "New password" : "Password"}<input name="password" required minLength={8} type="password" autoComplete={mode === "login" ? "current-password" : "new-password"} /></label>}
