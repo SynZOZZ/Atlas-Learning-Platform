@@ -8,5 +8,5 @@ export function slugify(value: string) {
 
 export function apiError(error: unknown, context: string) {
   console.error(context, error);
-  return Response.json({ error: error instanceof Error ? error.message : "Operation failed" }, { status: 500 });
+  return Response.json({ error: "The request could not be completed. Please try again." }, { status: 500 });
 }
