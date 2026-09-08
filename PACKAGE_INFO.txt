@@ -1,11 +1,11 @@
-ATLAS LEARNING PLATFORM — COMMERCIAL SOURCE PACKAGE
-Version: 1.1.0
-Package date: 2026-08-23
+4Z ACADEMY — COMMERCIAL SOURCE PACKAGE
+Version: 1.5.0
+Package date: 2026-09-08
 
 This delivery contains independent Next.js/PostgreSQL source code, Docker
-configuration, database schema and seed data, setup/backup scripts, and Arabic
-handover documentation. Demo brand, accounts, courses, contact details, payment
-settings, streaming settings, SMTP settings, and legal copy are placeholders and
-must be replaced before a public production launch.
+configuration, database schema and safe data migration, setup/backup scripts,
+and Arabic handover documentation. The retired nine-course demo catalog is
+removed automatically while administrator and real user data remain. Contact,
+payment, streaming, SMTP, and legal settings must be finalized before launch.
 
 Start with README.md, then read CLIENT_HANDOVER_AR.md.

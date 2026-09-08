@@ -3,12 +3,12 @@ import "./globals.css";
 import PwaRegister from "../components/pwa-register";
 
 export const metadata: Metadata = {
-  title: "Atlas Learning Platform",
+  title: "4Z Academy",
   description: "A secure bilingual learning platform for recorded and live courses.",
   manifest: "/manifest.webmanifest",
   icons: {
-    icon: "/favicon.svg",
-    shortcut: "/favicon.svg",
+    icon: "/assets/4z-academy-logo.png",
+    shortcut: "/assets/4z-academy-logo.png",
   },
 };
 
