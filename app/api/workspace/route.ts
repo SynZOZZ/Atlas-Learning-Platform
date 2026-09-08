@@ -9,6 +9,14 @@ const courseFields = `SELECT c.id,c.slug,c.title_en AS "titleEn",c.title_ar AS "
 c.summary_en AS "summaryEn",c.summary_ar AS "summaryAr",c.instructor_name AS "instructorName",c.instructor_email AS "instructorEmail",
 c.whatsapp,c.price::float8 AS price,c.mode,c.image_url AS "imageUrl",c.level,c.duration,c.published`;
 
+function validAssetUrl(value: string) {
+  if (value.startsWith("/api/")) return true;
+  try { return new URL(value).protocol === "https:"; }
+  catch { return false; }
+}
+const planTypes = ["full_curriculum", "mid_review", "before_mid", "after_mid", "final_review"];
+function accessCode() { const bytes = crypto.getRandomValues(new Uint8Array(8)); return `4Z-${Array.from(bytes, (byte) => byte.toString(36).padStart(2, "0")).join("").toUpperCase().slice(0, 12)}`; }
+
 export async function GET() {
   try {
     const access = await requireUser();
@@ -20,7 +28,7 @@ export async function GET() {
         ? await rows(`${courseFields} FROM courses c WHERE c.instructor_email=$1 ORDER BY c.id`, [user.email])
         : await rows(`${courseFields},e.payment_status AS "paymentStatus",e.status AS "enrollmentStatus",e.progress FROM courses c LEFT JOIN enrollments e ON e.course_id=c.id AND e.user_email=$1 WHERE c.published=TRUE ORDER BY c.id`, [user.email]);
     const lessons = user.role === "student"
-      ? await rows("SELECT l.id,l.course_id,l.title,l.kind,l.asset_url,l.duration,l.sort_order,l.published,l.created_at FROM lessons l JOIN enrollments e ON e.course_id=l.course_id WHERE e.user_email=$1 AND e.payment_status='paid' AND e.status='active' AND l.published=TRUE ORDER BY l.course_id,l.sort_order,l.id", [user.email])
+      ? await rows("SELECT DISTINCT l.id,l.course_id,l.title,l.kind,l.asset_url,l.duration,l.section_type,l.sort_order,l.published,l.created_at FROM lessons l JOIN enrollments e ON e.course_id=l.course_id JOIN access_codes a ON a.course_id=l.course_id AND a.student_email=e.user_email WHERE e.user_email=$1 AND e.payment_status='paid' AND e.status='active' AND l.published=TRUE AND a.status='redeemed' AND NOW() BETWEEN a.available_from AND a.available_until AND (a.plan_type='full_curriculum' OR l.section_type=a.section_type) AND (SELECT COUNT(*) FROM lessons l2 WHERE l2.course_id=l.course_id AND (a.plan_type='full_curriculum' OR l2.section_type=a.section_type) AND (l2.sort_order<l.sort_order OR (l2.sort_order=l.sort_order AND l2.id<=l.id)))<=a.section_limit ORDER BY l.course_id,l.sort_order,l.id", [user.email])
       : await rows("SELECT l.* FROM lessons l JOIN courses c ON c.id=l.course_id WHERE $1='admin' OR c.instructor_email=$2 ORDER BY l.course_id,l.sort_order,l.id", [user.role, user.email]);
     const enrollments = await rows(`SELECT e.*,c.title_en AS "courseTitle",u.name AS "studentName" FROM enrollments e JOIN courses c ON c.id=e.course_id LEFT JOIN users u ON u.email=e.user_email WHERE $1='admin' OR e.user_email=$2 OR c.instructor_email=$3 ORDER BY e.id DESC`, [user.role, user.email, user.email]);
     const notifications = await rows(`SELECT n.*,c.title_en AS "courseTitle" FROM notifications n LEFT JOIN courses c ON c.id=n.course_id WHERE n.user_email=$1 ORDER BY n.id DESC LIMIT 50`, [user.email]);
@@ -28,15 +36,22 @@ export async function GET() {
     const mediaAssets = user.role === "student"
       ? await rows(`SELECT a.id,a.course_id,'/api/files/' || a.id AS url,a.original_name AS "originalName",a.mime_type AS "mimeType",a.size_bytes::float8 AS "sizeBytes" FROM file_assets a JOIN enrollments e ON e.course_id=a.course_id WHERE e.user_email=$1 AND e.payment_status='paid' AND e.status='active' ORDER BY a.id DESC`, [user.email])
       : await rows(`SELECT a.id,a.course_id,'/api/files/' || a.id AS url,a.original_name AS "originalName",a.mime_type AS "mimeType",a.size_bytes::float8 AS "sizeBytes" FROM file_assets a JOIN courses c ON c.id=a.course_id WHERE $1='admin' OR c.instructor_email=$2 ORDER BY a.id DESC`, [user.role, user.email]);
-    let users: unknown[] = [], payments: unknown[] = [], deviceRequests: unknown[] = [];
+    let users: unknown[] = [], payments: unknown[] = [], deviceRequests: unknown[] = [], accessCodes: unknown[] = [];
     if (["admin", "instructor"].includes(user.role)) {
-      users = await rows(`SELECT id,email,name,role,status,phone,whatsapp,country,city,specialty,trusted_device_id AS "trustedDeviceId",created_at AS "createdAt" FROM users ORDER BY id DESC`);
+      users = user.role === "admin"
+        ? await rows(`SELECT id,email,name,role,status,phone,whatsapp,country,city,specialty,trusted_device_id AS "trustedDeviceId",created_at AS "createdAt" FROM users ORDER BY id DESC`)
+        : await rows(`SELECT DISTINCT u.id,u.email,u.name,u.role,u.status,u.phone,u.whatsapp,u.country,u.city,u.specialty,u.created_at AS "createdAt" FROM users u JOIN enrollments e ON e.user_email=u.email JOIN courses c ON c.id=e.course_id WHERE c.instructor_email=$1 AND u.role='student' ORDER BY u.id DESC`, [user.email]);
       payments = user.role === "admin"
         ? await rows(`SELECT p.*,p.amount::float8 AS amount,c.title_en AS "courseTitle",u.name AS "studentName" FROM payments p JOIN courses c ON c.id=p.course_id LEFT JOIN users u ON u.email=p.user_email ORDER BY p.id DESC`)
         : await rows(`SELECT p.*,p.amount::float8 AS amount,c.title_en AS "courseTitle",u.name AS "studentName" FROM payments p JOIN courses c ON c.id=p.course_id LEFT JOIN users u ON u.email=p.user_email WHERE c.instructor_email=$1 ORDER BY p.id DESC`, [user.email]);
       if (user.role === "admin") deviceRequests = await rows("SELECT * FROM device_requests WHERE status='pending' ORDER BY id DESC");
+      accessCodes = user.role === "admin"
+        ? await rows(`SELECT a.*,c.title_en AS "courseTitle",u.name AS "studentName" FROM access_codes a JOIN courses c ON c.id=a.course_id LEFT JOIN users u ON u.email=a.student_email ORDER BY a.id DESC`)
+        : await rows(`SELECT a.*,c.title_en AS "courseTitle",u.name AS "studentName" FROM access_codes a JOIN courses c ON c.id=a.course_id LEFT JOIN users u ON u.email=a.student_email WHERE c.instructor_email=$1 ORDER BY a.id DESC`, [user.email]);
+    } else {
+      accessCodes = await rows(`SELECT a.*,c.title_en AS "courseTitle" FROM access_codes a JOIN courses c ON c.id=a.course_id WHERE a.student_email=$1 ORDER BY a.id DESC`, [user.email]);
     }
-    return Response.json({ user, courses, lessons, enrollments, notifications, messages, mediaAssets, users, payments, deviceRequests });
+    return Response.json({ user, courses, lessons, enrollments, notifications, messages, mediaAssets, users, payments, deviceRequests, accessCodes, demoPayments: String(process.env.PAYMENT_PROVIDER || "manual").toLowerCase() === "demo" });
   } catch (error) { return apiError(error, "Workspace GET error"); }
 }
 
@@ -73,14 +88,39 @@ export async function POST(request: Request) {
       return Response.json({ ok: true });
     }
 
+    if (action === "generateAccessCode") {
+      if (user.role !== "admin") return Response.json({ error: "Administrator access required" }, { status: 403 });
+      const studentEmail=clean(data.studentEmail,160).toLowerCase(), courseId=Number(data.courseId), planType=clean(data.planType,40), sectionType=planType==="full_curriculum"?"full_curriculum":clean(data.sectionType,40)||planType;
+      const sectionLimit=Math.min(200,Math.max(1,Math.floor(Number(data.sectionLimit)||1))), days=Math.min(730,Math.max(1,Math.floor(Number(data.availabilityDays)||30)));
+      if (!await one("SELECT id FROM users WHERE email=$1 AND role='student'",[studentEmail]) || !await one("SELECT id FROM courses WHERE id=$1",[courseId]) || !planTypes.includes(planType) || !planTypes.includes(sectionType)) return Response.json({error:"Choose a valid student, course, and subscription plan"},{status:400});
+      const code=accessCode(), starts=new Date(), ends=new Date(starts.getTime()+days*86400000);
+      await pool.query("INSERT INTO access_codes(code,student_email,course_id,plan_type,section_type,section_limit,available_from,available_until,status,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,'active',$9)",[code,studentEmail,courseId,planType,sectionType,sectionLimit,starts,ends,user.email]);
+      await pool.query("INSERT INTO notifications(user_email,course_id,title,message) VALUES($1,$2,$3,$4)",[studentEmail,courseId,"Course access code created",`Your personal access code is ${code}. It expires in ${days} day(s).`]);
+      return Response.json({ok:true,code},{status:201});
+    }
+    if (action === "redeemAccessCode") {
+      if (user.role !== "student") return Response.json({error:"Student access required"},{status:403});
+      const code=clean(data.code,40).toUpperCase(); const grant=await one<{id:number;course_id:number}>("SELECT id,course_id FROM access_codes WHERE code=$1 AND student_email=$2 AND status='active' AND NOW() BETWEEN available_from AND available_until",[code,user.email]);
+      if(!grant) return Response.json({error:"This code is invalid, expired, or belongs to another student"},{status:400});
+      await withTransaction(async(client)=>{await client.query("UPDATE access_codes SET status='redeemed',redeemed_at=NOW() WHERE id=$1",[grant.id]);await client.query("INSERT INTO enrollments(user_email,course_id,payment_status,status) VALUES($1,$2,'paid','active') ON CONFLICT(user_email,course_id) DO UPDATE SET payment_status='paid',status='active'",[user.email,grant.course_id]);await client.query("INSERT INTO notifications(user_email,course_id,title,message) VALUES($1,$2,$3,$4)",[user.email,grant.course_id,"Course access activated","Your personal course access is now active."]);});
+      return Response.json({ok:true});
+    }
+    if (action === "revokeAccessCode") { if(user.role!=="admin") return Response.json({error:"Administrator access required"},{status:403}); await pool.query("UPDATE access_codes SET status='revoked' WHERE id=$1",[Number(data.id)]); return Response.json({ok:true}); }
+
     if (action === "enroll") {
       if (user.role !== "student" || user.status !== "approved") return Response.json({ error: "Approved student profile required" }, { status: 403 });
       const courseId = Number(data.courseId), method = clean(data.method, 40) as PaymentMethod;
+      const reference = clean(data.reference, 120);
       if (!(["test_card", "visa", "wallet", "cash_transfer"] as string[]).includes(method)) return Response.json({ error: "Invalid payment method" }, { status: 400 });
+      if (method === "test_card" && String(process.env.PAYMENT_PROVIDER || "manual").toLowerCase() !== "demo") return Response.json({ error: "Test payments are disabled" }, { status: 403 });
+      if (method !== "test_card" && !reference) return Response.json({ error: "A payment reference is required" }, { status: 400 });
       const course = await one<{ price: number }>("SELECT price::float8 AS price FROM courses WHERE id=$1 AND published=TRUE", [courseId]);
       if (!course) return Response.json({ error: "Course not found" }, { status: 404 });
+      const existingEnrollment = await one<{ payment_status: string; status: string }>("SELECT payment_status,status FROM enrollments WHERE user_email=$1 AND course_id=$2", [user.email, courseId]);
+      if (existingEnrollment?.payment_status === "paid" && existingEnrollment.status === "active") return Response.json({ error: "You already have access to this course" }, { status: 409 });
+      if (existingEnrollment?.payment_status === "pending" && existingEnrollment.status === "pending") return Response.json({ error: "A payment request is already waiting for review" }, { status: 409 });
       const decision = paymentDecision(method);
-      const payment = await one<{ id: number }>(`INSERT INTO payments (user_email,course_id,amount,method,reference,status) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`, [user.email, courseId, course.price, method, clean(data.reference, 120), decision.status]);
+      const payment = await one<{ id: number }>(`INSERT INTO payments (user_email,course_id,amount,method,reference,status) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`, [user.email, courseId, course.price, method, reference, decision.status]);
       await pool.query(`INSERT INTO enrollments (user_email,course_id,payment_status,status) VALUES ($1,$2,$3,$4) ON CONFLICT (user_email,course_id) DO UPDATE SET payment_status=EXCLUDED.payment_status,status=EXCLUDED.status`, [user.email, courseId, decision.paid ? "paid" : "pending", decision.paid ? "active" : "pending"]);
       await pool.query("INSERT INTO notifications (user_email,course_id,title,message) VALUES ($1,$2,$3,$4)", [user.email, courseId, decision.paid ? "Enrollment confirmed" : "Payment under review", decision.paid ? "Your course is now available in My learning." : "An administrator will review the payment details."]);
       return Response.json({ ok: true, paid: decision.paid, paymentId: payment?.id, checkoutUrl: decision.checkoutUrl });
@@ -105,10 +145,14 @@ export async function POST(request: Request) {
       const courseId = Number(data.courseId);
       const course = await one<{ instructor_email: string }>("SELECT instructor_email FROM courses WHERE id=$1", [courseId]);
       if (!course || (user.role === "instructor" && course.instructor_email !== user.email)) return Response.json({ error: "You cannot edit this course" }, { status: 403 });
-      const title = clean(data.title, 160), kind = clean(data.kind, 30) || "video";
+      const title = clean(data.title, 160), kind = clean(data.kind, 30) || "video", assetUrl = clean(data.assetUrl, 500), duration = clean(data.duration, 80);
       if (!title || !["video", "live", "file"].includes(kind)) return Response.json({ error: "Valid lesson title and type are required" }, { status: 400 });
+      if (!assetUrl || !validAssetUrl(assetUrl)) return Response.json({ error: kind === "live" ? "Add a secure HTTPS meeting link" : "Upload a file or add a secure HTTPS media link" }, { status: 400 });
+      if (kind === "live" && !duration) return Response.json({ error: "Add the live session date and time" }, { status: 400 });
       const order = await one<{ total: number }>("SELECT COUNT(*)::int AS total FROM lessons WHERE course_id=$1", [courseId]);
-      await pool.query("INSERT INTO lessons (course_id,title,kind,asset_url,duration,sort_order) VALUES ($1,$2,$3,$4,$5,$6)", [courseId, title, kind, clean(data.assetUrl, 500), clean(data.duration, 80), Number(order?.total || 0) + 1]);
+      const sectionType = clean(data.sectionType, 40) || "full_curriculum";
+      if (!planTypes.includes(sectionType)) return Response.json({ error: "Invalid section type" }, { status: 400 });
+      await pool.query("INSERT INTO lessons (course_id,title,kind,asset_url,duration,section_type,sort_order) VALUES ($1,$2,$3,$4,$5,$6,$7)", [courseId, title, kind, assetUrl, duration, sectionType, Number(order?.total || 0) + 1]);
       await pool.query(`INSERT INTO notifications (user_email,course_id,title,message) SELECT user_email,$1,$2,$3 FROM enrollments WHERE course_id=$1 AND payment_status='paid' AND status='active'`, [courseId, "New course material", `${title} is now available.`]);
       return Response.json({ ok: true }, { status: 201 });
     }
@@ -146,8 +190,8 @@ export async function POST(request: Request) {
         if (receiverEmail !== course.instructor_email) return Response.json({ error: "Students can only message this course's instructor" }, { status: 403 });
       } else {
         if (user.role === "instructor" && course.instructor_email !== user.email) return Response.json({ error: "Course access denied" }, { status: 403 });
-        const enrollment = await one("SELECT id FROM enrollments WHERE user_email=$1 AND course_id=$2", [receiverEmail, courseId]);
-        if (!enrollment) return Response.json({ error: "Choose a student enrolled in this course" }, { status: 400 });
+        const enrollment = await one("SELECT id FROM enrollments WHERE user_email=$1 AND course_id=$2 AND payment_status='paid' AND status='active'", [receiverEmail, courseId]);
+        if (!enrollment) return Response.json({ error: "Choose a student with active paid access to this course" }, { status: 400 });
       }
       const receiver = await one("SELECT id FROM users WHERE email=$1", [receiverEmail]);
       if (!receiver) return Response.json({ error: "Recipient account not found" }, { status: 404 });
