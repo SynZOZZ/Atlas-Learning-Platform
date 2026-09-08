@@ -44,8 +44,25 @@ CREATE TABLE IF NOT EXISTS lessons (
   kind TEXT NOT NULL DEFAULT 'video' CHECK (kind IN ('video','live','file')),
   asset_url TEXT NOT NULL DEFAULT '',
   duration TEXT NOT NULL DEFAULT '',
+  section_type TEXT NOT NULL DEFAULT 'full_curriculum' CHECK (section_type IN ('full_curriculum','mid_review','before_mid','after_mid','final_review')),
   sort_order INTEGER NOT NULL DEFAULT 0,
   published BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS access_codes (
+  id BIGSERIAL PRIMARY KEY,
+  code TEXT NOT NULL UNIQUE,
+  student_email TEXT NOT NULL REFERENCES users(email) ON UPDATE CASCADE ON DELETE CASCADE,
+  course_id BIGINT NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
+  plan_type TEXT NOT NULL CHECK (plan_type IN ('full_curriculum','mid_review','before_mid','after_mid','final_review')),
+  section_type TEXT NOT NULL CHECK (section_type IN ('full_curriculum','mid_review','before_mid','after_mid','final_review')),
+  section_limit INTEGER NOT NULL DEFAULT 1 CHECK (section_limit BETWEEN 1 AND 200),
+  available_from TIMESTAMPTZ NOT NULL,
+  available_until TIMESTAMPTZ NOT NULL,
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','redeemed','revoked')),
+  redeemed_at TIMESTAMPTZ,
+  created_by TEXT NOT NULL REFERENCES users(email) ON UPDATE CASCADE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -134,3 +151,4 @@ CREATE INDEX IF NOT EXISTS notifications_user_idx ON notifications(user_email, c
 CREATE INDEX IF NOT EXISTS messages_participants_idx ON messages(sender_email, receiver_email, created_at DESC);
 CREATE INDEX IF NOT EXISTS lessons_course_idx ON lessons(course_id, sort_order);
 CREATE INDEX IF NOT EXISTS payments_status_idx ON payments(status, created_at DESC);
+CREATE INDEX IF NOT EXISTS access_codes_student_course_idx ON access_codes(student_email, course_id);
