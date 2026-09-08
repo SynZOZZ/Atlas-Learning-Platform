@@ -33,7 +33,7 @@ export async function POST(request: Request) {
         await pool.query(`UPDATE courses SET title_en=$1,title_ar=$2,category_en=$3,category_ar=$4,summary_en=$5,summary_ar=$6,instructor_name=$7,instructor_email=$8,whatsapp=$9,price=$10,mode=$11,image_url=$12,level=$13,duration=$14,updated_at=NOW() WHERE id=$15`, [...params, id]);
       } else {
         const slug = `${slugify(titleEn) || "course"}-${Date.now().toString().slice(-6)}`;
-        await pool.query(`INSERT INTO courses (title_en,title_ar,category_en,category_ar,summary_en,summary_ar,instructor_name,instructor_email,whatsapp,price,mode,image_url,level,duration,slug,published) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,TRUE)`, [...params, slug]);
+        await pool.query(`INSERT INTO courses (title_en,title_ar,category_en,category_ar,summary_en,summary_ar,instructor_name,instructor_email,whatsapp,price,mode,image_url,level,duration,slug,published) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,FALSE)`, [...params, slug]);
       }
       return Response.json({ ok: true });
     }
